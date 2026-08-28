@@ -14,6 +14,7 @@ projects/
 │   └── lerobot/             # 从原始数据转换得到的 LeRobot 数据集
 ├── docs/                    # 机械臂用户手册和 CAN 协议资料
 ├── start_gello_follow.sh    # GELLO 跟随、校准和安全退出入口
+├── start_data_record.sh     # GELLO 跟随、原始数据记录和安全退出入口
 └── README.md                # 整个项目的架构、流程和联调说明
 ```
 
@@ -216,17 +217,41 @@ projects/data/raw/
 
 正在写入的 episode 使用 `.partial` 后缀。正常结束并完成刷新后再原子重命名为 `.jsonl`。转换器默认忽略 `.partial`，防止把异常中断的数据作为正式演示使用。
 
-实时记录不得把完整 episode 长期保存在内存中。推荐由控制线程将样本放入有界队列，后台线程负责 JSON 序列化和缓冲写盘。队列溢出必须报告错误并将 episode 标记为不完整，不能静默丢帧；也不应每帧调用 `fsync()`，以免磁盘延迟破坏控制周期。
+实时记录不把完整 episode 长期保存在内存中。控制线程将样本放入有界队列，后台线程负责 JSON 序列化和缓冲写盘。默认队列容量为 500 条，约每个控制频率周期数刷新一次用户态缓冲，并在 episode 结束时执行 `fsync()`。队列溢出会终止本次跟随并保留不完整 episode，不会静默丢帧。
 
 ## 5. Episode 操作约定
 
-跟随和记录是两个不同的状态，停止记录不应停止机械臂跟随。计划支持以下操作：
+跟随和记录是两个不同的状态，停止记录不会停止机械臂跟随。`start_data_record.sh` 启动后支持以下单键操作，无需按 Enter：
 
 ```text
 R       开始记录一个新 episode
 S       停止并保存当前 episode
 D       停止并丢弃当前 episode
+P       显示当前记录状态
+H       显示按键帮助
 Ctrl+C  结束跟随，随后执行既有的 PiPER-X JS 安全回零流程
+```
+
+默认启动方式：
+
+```bash
+cd ~/projects
+./start_data_record.sh --task "pick up the object"
+```
+
+默认仅启动跟随并等待按 `R`，不会自动记录。如果希望完成对齐后立即开始 episode 0，可以使用：
+
+```bash
+./start_data_record.sh --task "pick up the object" --start-recording
+```
+
+常用路径和性能参数：
+
+```bash
+./start_data_record.sh \
+  --raw-data-root ./data/raw \
+  --record-queue-size 500 \
+  --task "pick up the object"
 ```
 
 一次正式 episode 应对应一次完整任务演示，而不是简单对应固定大小的文件：
@@ -315,15 +340,22 @@ NaN/Inf 和维度错误数量
 - GELLO 七维目标映射和 PiPER-X JS 实时跟随。
 - 启动校准、通信异常处理和 Ctrl+C 安全回零。
 
+当前已经完成软件实现、但仍需通过实际硬件采集验证的是：
+
+- `start_data_record.sh` 独立数据记录入口；没有修改 `start_gello_follow.sh`。
+- `piper_x_follow_record.py` 带记录的 PiPER-X 专用跟随客户端。
+- `RawEpisodeRecorder` 异步 JSONL episode 记录器。
+- `R/S/D/P/H` 单键记录操作和 `--start-recording` 自动开始选项。
+- `manifest.json`、正式 `.jsonl`、异常 `.jsonl.partial` 和 session 重名保护。
+- 最终 action、实际 observation、单调时间戳、墙上时间和控制周期记录。
+
 当前尚待实现的是：
 
-- 原始数据 schema 和 `manifest.json` 的程序化校验。
-- 跟随循环中的异步 episode 记录器。
-- 开始、停止和丢弃 episode 的操作界面。
 - 原始数据到 LeRobot Dataset v3 的离线转换器。
 - 转换后的数据集加载验证和质量报告。
+- 第一阶段记录功能的真实 PiPER-X/GELLO 硬件验收和频率质量测试。
 
-在这些功能落地前，本文中的原始记录目录、按键和转换命令均属于设计约定，不应视为当前已经可执行的功能。
+离线转换部分仍属于设计约定；第一阶段原始记录入口已经可以执行，但首次使用必须在机械臂工作空间清空、急停可触及的条件下逐项验证。
 
 # 二、PiPER-X 与 GELLO 联调记录
 
@@ -558,3 +590,143 @@ GELLO 舵机     ←→ FTDI 串口   ←→ gello_software
 - 不使用自动杀进程的方式抢占串口。
 - 修改关节方向、单位换算或限制参数后必须逐轴、小幅验证。
 - 不能仅根据命令行状态断言机械臂已使能，应同时确认实际机械臂状态。
+
+
+
+
+
+# 三、PiPER-X 参数记录调试记录
+
+## 1. `start_data_record.sh` 跟随与原始数据记录
+
+### 1.1 功能和启动方式
+
+`start_data_record.sh` 在保留原有 CAN 检查、GELLO 状态读取、PiPER-X JS 回零、姿态对齐和 Ctrl+C 安全退出流程的基础上，启动独立的 `piper_x_follow_record.py` 客户端。默认行为是先进入跟随模式但不立即记录，便于先检查机械臂方向、夹爪和场景是否正常。
+
+推荐命令：
+
+```bash
+cd ~/projects
+./start_data_record.sh --task "pick up the object"
+```
+
+脚本依次完成：
+
+1. 配置并检查 PiPER-X CAN。
+2. 检查 GELLO 串口并读取当前七维状态。
+3. 启动 `ag-gello-server`，通过同一 JS 会话分步回零。
+4. 将 PiPER-X 对齐到 GELLO 当前姿态。
+5. 启动独立的 `piper_x_follow_record.py` 客户端。
+6. 进入正常跟随状态，但默认不记录数据。
+
+终端显示以下信息后，可以先操作 GELLO 检查跟随：
+
+```text
+GELLO 跟随已启动；R=开始，S=保存，D=丢弃，P=状态，H=帮助，Ctrl+C=退出
+```
+
+### 1.2 记录按键
+
+所有按键均为单键操作，不需要按 Enter：
+
+| 按键 | 功能 | 是否停止跟随 |
+| --- | --- | --- |
+| `R` | 开始记录一个新 episode | 否 |
+| `S` | 停止并保存当前 episode | 否 |
+| `D` | 停止并丢弃当前 episode | 否 |
+| `P` | 显示当前记录状态 | 否 |
+| `H` | 显示按键帮助 | 否 |
+| `Ctrl+C` | 结束跟随并通过现有 JS 服务安全回零 | 是 |
+
+确认跟随正常后按 `R`，程序创建 `episode_000000.jsonl.partial` 并从下一个控制周期开始记录。完成一次任务后按 `S`，程序刷新后台队列、执行落盘并将文件原子重命名为 `episode_000000.jsonl`，机械臂继续跟随。重置场景后可以再次按 `R` 录制 `episode_000001`，因此同一个 session 可以连续保存多个 episode。
+
+如果本次演示失败，按 `D` 会停止并删除当前 `.partial`，但不会停止跟随；下一次按 `R` 会重新使用同一个 episode 编号。如果当前没有活动 episode，按 `S` 或 `D` 只会显示提示，不会改变机械臂状态。
+
+### 1.3 推荐操作流程
+
+```text
+运行 start_data_record.sh
+    ↓
+完成回零和 GELLO 对齐
+    ↓
+先试运行跟随，不记录
+    ↓
+R：开始 episode 000000
+    ↓
+完成一次任务演示
+    ↓
+S：保存 episode 000000，继续跟随
+    ↓
+重置场景
+    ↓
+R：开始 episode 000001
+    ↓
+S：保存，或 D：丢弃
+    ↓
+Ctrl+C：结束跟随并安全回零
+```
+
+### 1.4 自动开始记录
+
+如果希望完成对齐后立即开始 episode 0，可以使用：
+
+```bash
+./start_data_record.sh --task "pick up the object" --start-recording
+```
+
+该模式没有跟随试运行阶段，只适合已经确认硬件、方向和场景均正常的情况。
+
+### 1.5 参数
+
+| 参数 | 含义 | 默认值 |
+| --- | --- | --- |
+| `--gello-port` | GELLO FTDI/Dynamixel 串口 | 当前 FTBM4Z46 by-id 路径 |
+| `--can-interface` | PiPER-X CAN 接口 | `can0` |
+| `--can-bitrate` | CAN 波特率 | `1000000` |
+| `--host` | `ag-gello-server` 地址 | `127.0.0.1` |
+| `--port` | `ag-gello-server` 端口 | `6001` |
+| `--raw-data-root` | 原始 session 根目录 | `projects/data/raw` |
+| `--task` | 当前 session 的任务描述 | `PiPER-X GELLO teleoperation` |
+| `--record-queue-size` | 后台异步写盘队列容量 | `500` |
+| `--start-recording` | 对齐完成后立即开始 episode 0 | 关闭 |
+| `--yes` | 跳过真实运动前的 `yes` 确认 | 关闭 |
+
+完整示例：
+
+```bash
+./start_data_record.sh \
+  --gello-port /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBM4Z46-if00-port0 \
+  --can-interface can0 \
+  --can-bitrate 1000000 \
+  --host 127.0.0.1 \
+  --port 6001 \
+  --raw-data-root ./data/raw \
+  --record-queue-size 500 \
+  --task "pick up the object"
+```
+
+相对形式的 `--raw-data-root` 按启动脚本的工作目录解析，随后转换为绝对路径，因此记录客户端进入 `gello_software` 目录后不会改变输出位置。
+
+### 1.6 输出文件
+
+默认输出结构：
+
+```text
+projects/data/raw/
+└── session_YYYYMMDD_HHMMSS/
+    ├── manifest.json
+    └── episodes/
+        ├── episode_000000.jsonl
+        ├── episode_000001.jsonl
+        └── episode_000002.jsonl.partial
+```
+
+`.jsonl` 表示已经按 `S` 正常保存的 episode；`.jsonl.partial` 表示仍在记录或被 Ctrl+C、通信错误等情况中断的数据，离线转换器默认不应将其作为正式 episode。
+
+### 1.7 Ctrl+C 和异常退出
+
+如果按 Ctrl+C 时存在活动 episode，记录客户端先停止接收新帧、排空后台队列并保留 `.partial`，随后外层 Shell 通过仍在运行的 `ag-gello-server` 执行 PiPER-X JS 安全回零。如果当前没有活动 episode，程序直接结束跟随并执行安全回零。
+
+不要使用 `kill -9` 停止数据记录流程，因为它无法刷新后台队列、恢复终端按键模式或执行 PiPER-X 安全回零。
+
+当前第一阶段记录功能已经通过 Shell 语法、Python 编译、Ruff 和单元测试验证，但仍需要通过实际 PiPER-X/GELLO 硬件采集确认控制频率、按键行为和输出数据质量。
