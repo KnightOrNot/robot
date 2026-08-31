@@ -121,6 +121,12 @@ if [[ ! -e "$gello_port" ]]; then
     echo "错误：GELLO 串口未连接：$gello_port" >&2
     exit 1
 fi
+if [[ ! -r "$gello_port" || ! -w "$gello_port" ]]; then
+    echo "错误：当前用户没有 GELLO 串口读写权限：$gello_port" >&2
+    echo "请执行：sudo usermod -aG dialout \"$USER\"" >&2
+    echo "然后注销并重新登录（或重启），再运行本脚本。" >&2
+    exit 1
+fi
 
 # 同一时间只允许一个自动跟随流程持有 GELLO 串口，避免两个读取线程互相
 # 抢占状态包并持续触发 Dynamixel COMM_RX_TIMEOUT (-3001)。
@@ -138,10 +144,34 @@ if [[ ! -e "/sys/class/net/$can_interface" ]]; then
     echo "错误: CAN 接口不存在: $can_interface" >&2
     exit 1
 fi
-(
+arm_status_json="$(
     cd "$agilex_dir"
-    uv run ag status --channel "$can_interface"
+    uv run ag status --channel "$can_interface" --wait 1.0
+)"
+printf '%s\n' "$arm_status_json"
+if ! printf '%s' "$arm_status_json" | "$gello_python" -c '
+import json
+import math
+import sys
+
+state = json.load(sys.stdin)
+joints = state.get("joint_angles_rad")
+fps = state.get("receive_fps")
+valid = (
+    isinstance(fps, (int, float))
+    and math.isfinite(fps)
+    and fps > 0
+    and isinstance(joints, list)
+    and len(joints) == 6
+    and all(isinstance(value, (int, float)) and math.isfinite(value) for value in joints)
+    and state.get("arm_status") is not None
 )
+raise SystemExit(0 if valid else 1)
+'; then
+    echo "错误：PiPER-X 未返回完整实时反馈，禁止进入运动流程。" >&2
+    echo "请检查机械臂电源、急停、CAN 接线和终端电阻。" >&2
+    exit 1
+fi
 
 echo "========== [3/6] 读取 GELLO 当前关节和夹爪 =========="
 gello_json="$("$gello_python" "$gello_dir/experiments/read_gello_joints.py" \

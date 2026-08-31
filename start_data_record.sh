@@ -7,6 +7,8 @@ agilex_dir="$projects_dir/agilexrobotics"
 gello_dir="$projects_dir/gello_software"
 gello_python="$gello_dir/.venv/bin/python"
 record_client="$gello_dir/experiments/piper_x_follow_record.py"
+lerobot_dir="$projects_dir/lerobot_recorder"
+lerobot_converter="$lerobot_dir/.venv/bin/lerobot-recorder"
 gello_port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBM4Z46-if00-port0"
 can_interface="can0"
 can_bitrate="1000000"
@@ -14,12 +16,16 @@ server_host="127.0.0.1"
 server_port="6001"
 joint_signs=(1 1 -1 -1 1 1)
 raw_data_root="$projects_dir/data/raw"
+lerobot_data_root="$projects_dir/data/lerobot"
+dataset_fps="30"
+convert_dataset=true
 task="PiPER-X GELLO teleoperation"
 record_queue_size="500"
 start_recording=false
 assume_yes=false
 server_pid=""
 server_log=""
+session_path_file=""
 follow_server_ready=false
 cleanup_running=false
 # 与普通跟随共用同一把锁，保证两个入口不会同时占用 GELLO 串口和 CAN 服务。
@@ -39,6 +45,9 @@ usage() {
   --host HOST             ag-gello-server 地址，默认 127.0.0.1
   --port PORT             ag-gello-server 端口，默认 6001
   --raw-data-root PATH    原始数据根目录，默认 projects/data/raw
+  --lerobot-data-root PATH  LeRobot 数据集根目录，默认 projects/data/lerobot
+  --dataset-fps FPS       LeRobot 目标帧率，默认 30
+  --skip-conversion       退出跟随后不自动转换 LeRobot Dataset v3
   --task TEXT             当前 session 的任务描述
   --record-queue-size N   异步写盘队列容量，默认 500
   --start-recording       对齐完成后立即开始 episode 0
@@ -108,6 +117,18 @@ while (( $# > 0 )); do
             raw_data_root="${2:?--raw-data-root 缺少路径}"
             shift 2
             ;;
+        --lerobot-data-root)
+            lerobot_data_root="${2:?--lerobot-data-root 缺少路径}"
+            shift 2
+            ;;
+        --dataset-fps)
+            dataset_fps="${2:?--dataset-fps 缺少数值}"
+            shift 2
+            ;;
+        --skip-conversion)
+            convert_dataset=false
+            shift
+            ;;
         --task)
             task="${2:?--task 缺少任务描述}"
             shift 2
@@ -152,8 +173,18 @@ if [[ ! -e "$gello_port" ]]; then
     echo "错误: GELLO 串口未连接：$gello_port" >&2
     exit 1
 fi
+if [[ ! -r "$gello_port" || ! -w "$gello_port" ]]; then
+    echo "错误: 当前用户没有 GELLO 串口读写权限：$gello_port" >&2
+    echo "请执行：sudo usermod -aG dialout \"$USER\"" >&2
+    echo "然后注销并重新登录（或重启），再运行本脚本。" >&2
+    exit 1
+fi
 if [[ ! "$record_queue_size" =~ ^[1-9][0-9]*$ ]]; then
     echo "错误: --record-queue-size 必须是正整数。" >&2
+    exit 2
+fi
+if [[ ! "$dataset_fps" =~ ^[1-9][0-9]*$ ]]; then
+    echo "错误: --dataset-fps 必须是正整数。" >&2
     exit 2
 fi
 if [[ -z "${task//[[:space:]]/}" ]]; then
@@ -162,6 +193,15 @@ if [[ -z "${task//[[:space:]]/}" ]]; then
 fi
 mkdir -p -- "$raw_data_root"
 raw_data_root="$(cd -- "$raw_data_root" && pwd)"
+if [[ "$convert_dataset" == true ]]; then
+    if [[ ! -x "$lerobot_converter" ]]; then
+        echo "错误: 找不到 LeRobot 转换器：$lerobot_converter" >&2
+        echo "请在 $lerobot_dir 执行：uv sync --extra dataset" >&2
+        exit 1
+    fi
+    mkdir -p -- "$lerobot_data_root"
+    lerobot_data_root="$(cd -- "$lerobot_data_root" && pwd)"
+fi
 
 exec 9>"$lock_file"
 if ! flock -n 9; then
@@ -177,10 +217,34 @@ if [[ ! -e "/sys/class/net/$can_interface" ]]; then
     echo "错误: CAN 接口不存在：$can_interface" >&2
     exit 1
 fi
-(
+arm_status_json="$(
     cd "$agilex_dir"
-    uv run ag status --channel "$can_interface"
+    uv run ag status --channel "$can_interface" --wait 1.0
+)"
+printf '%s\n' "$arm_status_json"
+if ! printf '%s' "$arm_status_json" | "$gello_python" -c '
+import json
+import math
+import sys
+
+state = json.load(sys.stdin)
+joints = state.get("joint_angles_rad")
+fps = state.get("receive_fps")
+valid = (
+    isinstance(fps, (int, float))
+    and math.isfinite(fps)
+    and fps > 0
+    and isinstance(joints, list)
+    and len(joints) == 6
+    and all(isinstance(value, (int, float)) and math.isfinite(value) for value in joints)
+    and state.get("arm_status") is not None
 )
+raise SystemExit(0 if valid else 1)
+'; then
+    echo "错误：PiPER-X 未返回完整实时反馈，禁止进入运动流程。" >&2
+    echo "请检查机械臂电源、急停、CAN 接线和终端电阻。" >&2
+    exit 1
+fi
 
 echo "========== [3/6] 读取 GELLO 当前关节和夹爪 =========="
 gello_json="$("$gello_python" "$gello_dir/experiments/read_gello_joints.py" \
@@ -262,6 +326,7 @@ echo "========== [5/6] 使用同一 JS 会话对齐 PiPER-X 六轴和夹爪…�
 
 echo "========== [6/6] 启动 GELLO 跟随和原始数据记录客户端…… =========="
 echo "R=开始，S=保存，D=丢弃，P=状态，H=帮助；Ctrl+C 停止并安全回零。"
+session_path_file="$(mktemp --tmpdir piper-x-raw-session.XXXXXX)"
 record_args=(
     --gello-port "$gello_port"
     --hostname "$server_host"
@@ -270,6 +335,7 @@ record_args=(
     --joint-signs "${joint_signs[@]}"
     --absolute-leader
     --raw-data-root "$raw_data_root"
+    --session-path-file "$session_path_file"
     --task "$task"
     --record-queue-size "$record_queue_size"
 )
@@ -280,3 +346,33 @@ fi
     cd "$gello_dir"
     exec "$gello_python" experiments/piper_x_follow_record.py "${record_args[@]}" 9>&-
 )
+
+# 转换是离线重任务。必须先完成安全回零并关闭 CAN/ZMQ 服务，不能让
+# PyTorch/Arrow 初始化延迟机械臂退出流程。
+cleanup
+
+if [[ ! -s "$session_path_file" ]]; then
+    echo "错误：记录客户端没有返回本次 raw session 路径。" >&2
+    rm -f -- "$session_path_file"
+    exit 1
+fi
+raw_session="$(<"$session_path_file")"
+rm -f -- "$session_path_file"
+session_path_file=""
+
+if [[ "$convert_dataset" == true ]]; then
+    if find "$raw_session/episodes" -maxdepth 1 -type f -name 'episode_*.jsonl' \
+        -print -quit | grep -q .; then
+        session_name="$(basename -- "$raw_session")"
+        dataset_output="$lerobot_data_root/$session_name"
+        echo "========== [离线转换] 生成 LeRobot Dataset v3 =========="
+        "$lerobot_converter" \
+            "$raw_session" \
+            "$dataset_output" \
+            --repo-id "local/piper_x_gello_$session_name" \
+            --fps "$dataset_fps"
+        echo "LeRobot Dataset 已生成：$dataset_output"
+    else
+        echo "[离线转换] 本次 session 没有正式保存的 episode，跳过转换。"
+    fi
+fi

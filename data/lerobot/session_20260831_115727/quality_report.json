@@ -1,0 +1,55 @@
+{
+  "source_session": "/home/knight/projects/robot/data/raw/session_20260831_115727",
+  "output_root": "/home/knight/projects/robot/data/lerobot/session_20260831_115727",
+  "repo_id": "local/piper_x_gello_20260831_115727",
+  "target_fps": 30,
+  "raw_samples": 1500,
+  "converted_frames": 912,
+  "kept_episodes": 3,
+  "ignored_partial_episodes": 0,
+  "failed_episodes": 0,
+  "episodes": [
+    {
+      "source": "/home/knight/projects/robot/data/raw/session_20260831_115727/episodes/episode_000000.jsonl",
+      "raw_samples": 839,
+      "converted_frames": 512,
+      "duration_s": 17.040523389,
+      "actual_sample_hz": 49.17689327200747,
+      "average_interval_ms": 20.334753447494034,
+      "max_interval_ms": 29.47335,
+      "missing_sequences": 0,
+      "duplicate_sequences": 0,
+      "dimension_errors": 0,
+      "non_finite_errors": 0,
+      "max_time_match_error_ms": 11.589441
+    },
+    {
+      "source": "/home/knight/projects/robot/data/raw/session_20260831_115727/episodes/episode_000001.jsonl",
+      "raw_samples": 260,
+      "converted_frames": 158,
+      "duration_s": 5.238679206,
+      "actual_sample_hz": 49.43994274422461,
+      "average_interval_ms": 20.22656064092664,
+      "max_interval_ms": 30.927503,
+      "missing_sequences": 0,
+      "duplicate_sequences": 0,
+      "dimension_errors": 0,
+      "non_finite_errors": 0,
+      "max_time_match_error_ms": 11.360504
+    },
+    {
+      "source": "/home/knight/projects/robot/data/raw/session_20260831_115727/episodes/episode_000002.jsonl",
+      "raw_samples": 401,
+      "converted_frames": 242,
+      "duration_s": 8.065679097,
+      "actual_sample_hz": 49.59284831314186,
+      "average_interval_ms": 20.1641977425,
+      "max_interval_ms": 24.051604,
+      "missing_sequences": 0,
+      "duplicate_sequences": 0,
+      "dimension_errors": 0,
+      "non_finite_errors": 0,
+      "max_time_match_error_ms": 11.077074666503906
+    }
+  ]
+}

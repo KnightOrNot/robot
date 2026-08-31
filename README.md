@@ -8,7 +8,7 @@
 projects/
 ├── agilexrobotics/          # PiPER-X CAN 驱动、状态反馈和 ZMQ 控制服务
 ├── gello_software/          # GELLO Dynamixel 读取、目标映射和实时跟随
-├── lerobot_recorder/        # 原始数据规范与 LeRobot 离线转换工具（待实现）
+├── lerobot_recorder/        # 原始数据校验与 LeRobot Dataset v3 离线转换
 ├── data/                    # 采集数据根目录，不属于任何代码子项目
 │   ├── raw/                 # 实时采集的原始数据，是不可变数据源
 │   └── lerobot/             # 从原始数据转换得到的 LeRobot 数据集
@@ -143,10 +143,28 @@ recorder_python="$projects_dir/lerobot_recorder/.venv/bin/python"
 LeRobot 数据集依赖应安装在 `lerobot_recorder` 的独立环境中：
 
 ```bash
-uv add "lerobot[dataset]==0.6.1"
+uv sync --extra dataset
 ```
 
 不应仅为数据转换而修改已经通过硬件验证的 GELLO 或 AgileX 环境。实际实现时应提交 `uv.lock`，由锁文件固定 LeRobot 及其传递依赖版本。这里使用的`0.6.1` 是当前可从 PyPI 安装的发行版；此前本地 LeRobot 源码中声明的`0.6.2` 不代表该版本已经发布到 PyPI。
+
+### 3.1 频率与 FPS 配置
+
+本项目中的“频率”分为 GELLO Dynamixel 读取频率、跟随控制/原始记录频率、PiPER-X CAN 反馈频率和 LeRobot 数据集 FPS。它们含义不同，不应将 `ag status` 的 `receive_fps`、raw manifest 的 `control_hz` 和 LeRobot `info.json` 的 `fps` 当成同一个参数。
+
+| 环节 | 当前设置 | 代码位置 | 如何修改 |
+| --- | --- | --- | --- |
+| GELLO Dynamixel 后台读取 | 每轮读取前 `sleep(0.01)`，理论上限低于 100 Hz | `gello_software/gello/dynamixel/driver.py` 的 `_read_joint_states()` | 修改 `time.sleep(0.01)`；但实际频率还受 FTDI、Dynamixel 串口通信时间和七个舅机返回时间限制 |
+| 普通 GELLO 跟随 | 默认 50 Hz | `gello_software/experiments/piper_x_follow.py` 的 `--hz` | 修改 `parser.add_argument("--hz", ..., default=50.0)`，或在 `start_gello_follow.sh` 调用该客户端时追加 `--hz 目标值` |
+| 带记录的 GELLO 跟随 | 默认 50 Hz | `gello_software/experiments/piper_x_follow_record.py` 的 `--hz` | 修改该参数默认值，或在 `start_data_record.sh` 的 `record_args` 中追加 `--hz 目标值` |
+| 跟随循环限速器 | 由上述 `--hz` 传入 | `gello_software/gello/env.py` 的 `RobotEnv(..., control_rate_hz=...)` 和 `Rate.sleep()` | 通常不直接修改 `RobotEnv` 的 100 Hz 通用默认值，因为 PiPER-X 两个客户端已显式传入 `args.hz` |
+| AgileX ZMQ 命令处理 | 无独立 FPS | `agilexrobotics/src/agilexrobotics/gello_server.py` 的 REP 请求循环 | 服务端每收到一次客户端请求就处理一次，因此 PiPER-X JS 命令频率由跟随客户端的 `--hz` 决定 |
+| PiPER-X CAN 反馈 | 由机械臂固件和 pyAgxArm SDK 的 CAN 广播/接收线程决定 | `agilexrobotics/src/agilexrobotics/driver.py` 的 `get_receive_fps()` 仅返回 `self._arm.get_fps()` | 当前封装没有修改 CAN 反馈 FPS 的接口；`uv run ag fps` 或 `uv run ag status` 只用于观测，不会设置频率 |
+| LeRobot Dataset v3 | 默认 30 FPS | `start_data_record.sh` 的 `dataset_fps=30`，以及 `lerobot_recorder` CLI 的 `--fps` | 自动转换使用 `./start_data_record.sh --dataset-fps 30`；手工转换使用 `lerobot-recorder ... --fps 30` |
+
+普通跟随和记录跟随必须保持相同的控制频率，否则两种模式的响应、单步变化和 raw 数据密度会不一致。修改跟随频率时，应同时更新 `piper_x_follow.py` 和 `piper_x_follow_record.py`，或者在两个总 shell 脚本中向客户端传入相同的 `--hz`。raw manifest 的 `control_hz` 会由记录客户端自动写入，不要手工编辑 manifest。
+
+设置值是目标频率，不代表硬件一定能达到。`RobotEnv.step()` 在一个周期内依次发送 ZMQ 命令、等待服务端返回、限速休眠，再请求 observation；如果串口、ZMQ、CAN 或机械臂处理总耗时超过目标周期，实际频率会低于 `--hz`。应以转换后 `quality_report.json` 中的 `actual_sample_hz`、`average_interval_ms` 和 `max_interval_ms` 判断实际采集质量。
 
 ## 4. 阶段一：实时原始数据记录
 
@@ -203,7 +221,7 @@ projects/data/raw/
   "format": "piper_x_gello_raw",
   "format_version": 1,
   "robot_type": "piper_x",
-  "control_hz": 100,
+  "control_hz": 50.0,
   "joint_units": "rad",
   "gripper_range": [0.0, 1.0],
   "quaternion_order": "xyzw",
@@ -317,7 +335,7 @@ timestamp
 task_index
 ```
 
-当前控制循环默认为 100 Hz，目标数据集可以采用 30 FPS。降采样不能简单使用 `frames[::3]`，因为 `100 / 3` 并不等于 30，且实际控制周期存在抖动。转换器应依据 `observation_time_ns` 建立 30 FPS 目标时间轴，并为每个目标时间选择最近的有效样本。
+当前控制循环默认为 50 Hz，目标数据集默认为 30 FPS。降采样不能简单使用固定步长，因为 `50 / 30` 不是整数，且实际控制周期存在抖动。转换器依据 `observation_time_ns` 建立目标时间轴，并为每个目标时间选择最近的有效样本。
 
 每次转换还应输出质量报告，至少包括：
 
@@ -331,6 +349,74 @@ NaN/Inf 和维度错误数量
 保留、忽略和失败的 episode 数量
 ```
 
+### 6.1 自动转换
+
+`start_data_record.sh` 默认在记录客户端退出后自动转换。脚本会先完成 PiPER-X JS 安全回零并关闭 CAN/ZMQ 服务，再将本次 `data/raw/session_YYYYMMDD_HHMMSS` 转换到同名的 `data/lerobot/session_YYYYMMDD_HHMMSS`。只有按 `S` 保存的 `.jsonl` 会成为正式 episode；`.jsonl.partial` 会被统计但忽略；如果 session 中没有正式 episode，脚本会跳过转换。
+
+```bash
+./start_data_record.sh \
+  --task "pick up the object" \
+  --dataset-fps 30 \
+  --lerobot-data-root ./data/lerobot
+```
+
+如果当次只需保留 raw session，不要进行自动转换：
+
+```bash
+./start_data_record.sh --task "pick up the object" --skip-conversion
+```
+
+### 6.2 手工转换
+
+手工转换适用于历史 raw session、更换目标 FPS，或者使用不同 feature 组合重新生成数据集。先初始化独立环境：
+
+```bash
+cd ~/projects/robot/lerobot_recorder
+uv sync --extra dataset
+```
+
+然后转换一个已录制 session：
+
+```bash
+cd ~/projects/robot/lerobot_recorder
+uv run --extra dataset lerobot-recorder \
+  ../data/raw/session_YYYYMMDD_HHMMSS \
+  ../data/lerobot/session_YYYYMMDD_HHMMSS \
+  --repo-id local/piper_x_gello_session_YYYYMMDD_HHMMSS \
+  --fps 30
+```
+
+默认保留 `observation.velocity` 和 `observation.ee_pose`。如果某个下游任务不需要它们，可以分别追加 `--without-velocity` 或 `--without-ee-pose`。输出路径必须尚不存在，转换器不会覆盖已有数据集；需要用不同参数重新转换时，应使用新的输出目录名。
+
+### 6.3 转换内部流程
+
+```text
+manifest.json + episodes/*.jsonl
+              │
+              ├── 校验格式版本、单位、字段、7 维形状、NaN/Inf
+              ├── 校验 sequence 连续和 observation_time_ns 严格递增
+              ├── 忽略 episodes/*.jsonl.partial
+              ├── 按 observation_time_ns 建立目标 FPS 时间轴
+              ├── 为每个目标时刻选择最近的 raw 样本
+              ├── LeRobotDataset.add_frame() / save_episode() / finalize()
+              └── meta/ + data/ + quality_report.json
+```
+
+转换器先完成全部 raw 校验，再创建输出数据集。任何正式 episode 存在 manifest 不匹配、sequence 缺口、时间戳倒退、维度错误或 NaN/Inf 时，整个转换立即失败，不会静默跳过损坏的正式 episode。
+
+输出中 `meta/info.json` 记录 `codebase_version: v3.0`、目标 `fps`、feature 定义和 episode/frame 总数；`data/chunk-*/file-*.parquet` 保存帧数据；`meta/stats.json` 保存统计量；`quality_report.json` 保存 raw 采集频率、采样间隔、时间匹配误差和 episode 处理数量。
+
+### 6.4 转换结果检查
+
+先检查质量报告和 v3 元数据：
+
+```bash
+python -m json.tool data/lerobot/session_YYYYMMDD_HHMMSS/quality_report.json
+python -m json.tool data/lerobot/session_YYYYMMDD_HHMMSS/meta/info.json
+```
+
+重点确认 `failed_episodes` 和各项错误数量为 0，`kept_episodes`、`total_episodes` 与预期一致，`actual_sample_hz` 接近原始跟随频率，`max_interval_ms` 和 `max_time_match_error_ms` 没有异常尖峰，并且 `meta/info.json` 中的 `codebase_version` 为 `v3.0`、`fps` 等于转换时的目标值。
+
 ## 7. 当前实现状态
 
 当前已经完成并通过硬件联调的是：
@@ -340,7 +426,7 @@ NaN/Inf 和维度错误数量
 - GELLO 七维目标映射和 PiPER-X JS 实时跟随。
 - 启动校准、通信异常处理和 Ctrl+C 安全回零。
 
-当前已经完成软件实现、但仍需通过实际硬件采集验证的是：
+当前已经完成并通过实际硬件验证的是：
 
 - `start_data_record.sh` 独立数据记录入口；没有修改 `start_gello_follow.sh`。
 - `piper_x_follow_record.py` 带记录的 PiPER-X 专用跟随客户端。
@@ -348,14 +434,11 @@ NaN/Inf 和维度错误数量
 - `R/S/D/P/H` 单键记录操作和 `--start-recording` 自动开始选项。
 - `manifest.json`、正式 `.jsonl`、异常 `.jsonl.partial` 和 session 重名保护。
 - 最终 action、实际 observation、单调时间戳、墙上时间和控制周期记录。
-
-当前尚待实现的是：
-
 - 原始数据到 LeRobot Dataset v3 的离线转换器。
 - 转换后的数据集加载验证和质量报告。
 - 第一阶段记录功能的真实 PiPER-X/GELLO 硬件验收和频率质量测试。
 
-离线转换部分仍属于设计约定；第一阶段原始记录入口已经可以执行，但首次使用必须在机械臂工作空间清空、急停可触及的条件下逐项验证。
+记录脚本退出时先通过已建立的 JS 会话安全回零并关闭 CAN/ZMQ 服务，然后再启动离线转换，避免 PyTorch/Arrow 初始化影响机械臂退出。
 
 # 二、PiPER-X 与 GELLO 联调记录
 
@@ -686,6 +769,9 @@ Ctrl+C：结束跟随并安全回零
 | `--host` | `ag-gello-server` 地址 | `127.0.0.1` |
 | `--port` | `ag-gello-server` 端口 | `6001` |
 | `--raw-data-root` | 原始 session 根目录 | `projects/data/raw` |
+| `--lerobot-data-root` | LeRobot Dataset v3 根目录 | `projects/data/lerobot` |
+| `--dataset-fps` | 离线数据集目标帧率 | `30` |
+| `--skip-conversion` | 安全退出后跳过离线转换 | 关闭 |
 | `--task` | 当前 session 的任务描述 | `PiPER-X GELLO teleoperation` |
 | `--record-queue-size` | 后台异步写盘队列容量 | `500` |
 | `--start-recording` | 对齐完成后立即开始 episode 0 | 关闭 |
@@ -701,11 +787,13 @@ Ctrl+C：结束跟随并安全回零
   --host 127.0.0.1 \
   --port 6001 \
   --raw-data-root ./data/raw \
+  --lerobot-data-root ./data/lerobot \
+  --dataset-fps 30 \
   --record-queue-size 500 \
   --task "pick up the object"
 ```
 
-相对形式的 `--raw-data-root` 按启动脚本的工作目录解析，随后转换为绝对路径，因此记录客户端进入 `gello_software` 目录后不会改变输出位置。
+相对形式的数据根目录按启动脚本的工作目录解析，随后转换为绝对路径，因此子进程切换工作目录后不会改变输出位置。
 
 ### 1.6 输出文件
 
@@ -721,7 +809,9 @@ projects/data/raw/
         └── episode_000002.jsonl.partial
 ```
 
-`.jsonl` 表示已经按 `S` 正常保存的 episode；`.jsonl.partial` 表示仍在记录或被 Ctrl+C、通信错误等情况中断的数据，离线转换器默认不应将其作为正式 episode。
+`.jsonl` 表示已经按 `S` 正常保存的 episode；`.jsonl.partial` 表示仍在记录或被 Ctrl+C、通信错误等情况中断的数据，离线转换器会统计但忽略它。
+
+正常退出后，脚本先安全回零并关闭控制服务，再将本次 session 自动转换到 `data/lerobot/<session_name>/`。如果没有按 `S` 保存任何正式 episode，则跳过转换；如需只保留 raw 数据，使用 `--skip-conversion`。
 
 ### 1.7 Ctrl+C 和异常退出
 
@@ -729,4 +819,4 @@ projects/data/raw/
 
 不要使用 `kill -9` 停止数据记录流程，因为它无法刷新后台队列、恢复终端按键模式或执行 PiPER-X 安全回零。
 
-当前第一阶段记录功能已经通过 Shell 语法、Python 编译、Ruff 和单元测试验证，但仍需要通过实际 PiPER-X/GELLO 硬件采集确认控制频率、按键行为和输出数据质量。
+当前跟随、原始记录和离线转换都已通过实际 PiPER-X/GELLO 数据验证。

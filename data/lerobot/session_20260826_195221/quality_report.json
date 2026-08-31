@@ -1,0 +1,27 @@
+{
+  "source_session": "/home/knight/projects/robot/data/raw/session_20260826_195221",
+  "output_root": "/home/knight/projects/robot/data/lerobot/session_20260826_195221",
+  "repo_id": "local/piper_x_gello_20260826_195221",
+  "target_fps": 30,
+  "raw_samples": 573,
+  "converted_frames": 348,
+  "kept_episodes": 1,
+  "ignored_partial_episodes": 0,
+  "failed_episodes": 0,
+  "episodes": [
+    {
+      "source": "/home/knight/projects/robot/data/raw/session_20260826_195221/episodes/episode_000000.jsonl",
+      "raw_samples": 573,
+      "converted_frames": 348,
+      "duration_s": 11.5832959,
+      "actual_sample_hz": 49.381454547837286,
+      "average_interval_ms": 20.25051730769231,
+      "max_interval_ms": 23.544429,
+      "missing_sequences": 0,
+      "duplicate_sequences": 0,
+      "dimension_errors": 0,
+      "non_finite_errors": 0,
+      "max_time_match_error_ms": 10.920529333007812
+    }
+  ]
+}

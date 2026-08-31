@@ -1,0 +1,46 @@
+{
+  "format": "piper_x_gello_raw",
+  "format_version": 1,
+  "created_at": "2026-08-31T13:46:14.926699+08:00",
+  "clock": "time.monotonic_ns",
+  "robot_type": "piper_x",
+  "control_hz": 50.0,
+  "task": "PiPER-X GELLO teleoperation",
+  "joint_units": "rad",
+  "velocity_units": "rad/s",
+  "position_units": "m",
+  "gripper_range": [
+    0.0,
+    1.0
+  ],
+  "quaternion_order": "xyzw",
+  "joint_names": [
+    "joint_1",
+    "joint_2",
+    "joint_3",
+    "joint_4",
+    "joint_5",
+    "joint_6",
+    "gripper"
+  ],
+  "joint_signs": [
+    1,
+    1,
+    -1,
+    -1,
+    1,
+    1
+  ],
+  "sample_fields": [
+    "sequence",
+    "command_time_ns",
+    "observation_time_ns",
+    "wall_time_ns",
+    "control_period_ns",
+    "action",
+    "joint_positions",
+    "joint_velocities",
+    "ee_pos_quat",
+    "gripper_position"
+  ]
+}
