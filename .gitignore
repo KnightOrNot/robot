@@ -1,2 +1,5 @@
 # all folders
 */.venv/*
+
+# data files
+data/
