@@ -14,6 +14,7 @@ can_interface="can0"
 can_bitrate="1000000"
 server_host="127.0.0.1"
 server_port="6001"
+hz="50"
 joint_signs=(1 1 -1 -1 1 1)
 raw_data_root="$projects_dir/data/raw"
 lerobot_data_root="$projects_dir/data/lerobot"
@@ -44,6 +45,7 @@ usage() {
   --can-bitrate RATE      CAN 波特率，默认 1000000
   --host HOST             ag-gello-server 地址，默认 127.0.0.1
   --port PORT             ag-gello-server 端口，默认 6001
+  --hz HZ                 GELLO 跟随、raw 采样和 PiPER-X JS 命令频率，默认 50
   --raw-data-root PATH    原始数据根目录，默认 projects/data/raw
   --lerobot-data-root PATH  LeRobot 数据集根目录，默认 projects/data/lerobot
   --dataset-fps FPS       LeRobot 目标帧率，默认 30
@@ -113,6 +115,10 @@ while (( $# > 0 )); do
             server_port="${2:?--port 缺少端口}"
             shift 2
             ;;
+        --hz)
+            hz="${2:?--hz 缺少数值}"
+            shift 2
+            ;;
         --raw-data-root)
             raw_data_root="${2:?--raw-data-root 缺少路径}"
             shift 2
@@ -168,6 +174,19 @@ fi
 if [[ ! -f "$record_client" ]]; then
     echo "错误: 找不到记录客户端：$record_client" >&2
     exit 1
+fi
+if ! "$gello_python" -c '
+import math
+import sys
+
+try:
+    value = float(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(0 if math.isfinite(value) and value > 0 else 1)
+' "$hz"; then
+    echo "错误: --hz 必须是正有限数值。" >&2
+    exit 2
 fi
 if [[ ! -e "$gello_port" ]]; then
     echo "错误: GELLO 串口未连接：$gello_port" >&2
@@ -300,7 +319,8 @@ server_log="$(mktemp --tmpdir ag-gello-server.XXXXXX.log)"
     exec setsid uv run ag-gello-server \
         --channel "$can_interface" \
         --host "$server_host" \
-        --port "$server_port" 9>&-
+        --port "$server_port" \
+        --hz "$hz" 9>&-
 ) >"$server_log" 2>&1 &
 server_pid=$!
 
@@ -331,6 +351,7 @@ record_args=(
     --gello-port "$gello_port"
     --hostname "$server_host"
     --robot-port "$server_port"
+    --hz "$hz"
     --start-joints "${gello_values[@]:0:6}"
     --joint-signs "${joint_signs[@]}"
     --absolute-leader
