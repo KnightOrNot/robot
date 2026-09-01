@@ -933,8 +933,8 @@ git submodule status
 | 行首 | 含义 | 处理方式 |
 | --- | --- | --- |
 | 空格 | 已检出到顶层记录的 commit | 无需处理 |
-| `-` | submodule 尚未初始化 | 执行 `git submodule update --init --recursive` |
-| `+` | 当前 commit 与顶层记录不一致 | 先确认是否在开发；否则执行 `git submodule update --init --recursive` |
+| `-` | 一级 submodule 尚未初始化 | 执行 `git submodule update --init` |
+| `+` | 当前 commit 与顶层记录不一致 | 先确认是否在开发；否则执行 `git submodule update --init` |
 | `U` | 存在 submodule 合并冲突 | 不要继续运行硬件流程，先解决顶层 Git 冲突 |
 
 `git status --short` 只会把 submodule 概括为一个路径。需要判断子项目内部是否有未提交修改时，分别执行：
@@ -950,8 +950,8 @@ git -C lerobot_converter status --short
 顶层 `.gitmodules` 是 URL 的权威来源。修改或切换仓库地址后先同步本地 Git 配置，再初始化：
 
 ```bash
-git submodule sync --recursive
-git submodule update --init --recursive
+git submodule sync
+git submodule update --init
 ```
 
 如果网络中断，可直接重复第二条命令。不要手工把普通目录复制进空的 submodule 路径，这会破坏 gitlink 的版本关系。
@@ -964,9 +964,9 @@ git submodule update --init --recursive
 ./setup.sh
 ```
 
-脚本按顺序安装 pyenv 编译依赖、准备 pyenv 和 uv、递归初始化 submodule、读取三个 `.python-version`、用 pyenv 安装解释器、用 uv 创建独立 `.venv`，最后验证 CLI、FFmpeg、TorchCodec 和 `dialout`。脚本检测到已有 submodule 包含未提交内容时会停止，不会 reset 或覆盖开发现场。
+脚本按顺序安装 pyenv 编译依赖、准备 pyenv 和 uv、初始化三个一级 submodule、读取三个 `.python-version`、用 pyenv 安装解释器、用 uv 创建独立 `.venv`，最后验证 CLI、FFmpeg、TorchCodec 和 `dialout`。脚本检测到已有 submodule 包含未提交内容时会停止，不会 reset 或覆盖开发现场。
 
-无需修改系统时使用 `./setup.sh --skip-system`；只验证当前状态时使用 `./setup.sh --check-only`；需要上游仿真、相机和其他机器人依赖时使用 `./setup.sh --gello-extra full`。所有模式均不会配置 CAN 或访问硬件。
+无需修改系统时使用 `./setup.sh --skip-system`；只验证当前状态时使用 `./setup.sh --check-only`；需要上游仿真、相机和其他机器人 Python 依赖时使用 `./setup.sh --gello-extra full`。MuJoCo Menagerie 模型体积较大，默认不下载；只有仿真开发需要运行 `./setup.sh --with-simulation-assets`。所有模式均不会配置 CAN 或访问硬件。
 
 ### 4. 验证三个 Python 环境
 

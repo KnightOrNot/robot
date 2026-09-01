@@ -104,7 +104,7 @@ git clone https://github.com/right-or-not/robot.git
 cd robot
 ```
 
-`setup.sh` 会按顶层锁定的 commit 递归初始化三个子项目以及 GELLO 的 Menagerie 资产，不要求 clone 时添加 `--recurse-submodules`。
+`setup.sh` 会按顶层锁定的 commit 初始化三个一级子项目，不要求 clone 时添加 `--recurse-submodules`。体积较大且正常 PiPER-X 开发不需要的 MuJoCo Menagerie 默认不会下载。
 
 ### 2. 一键配置软件环境
 
@@ -119,12 +119,15 @@ cd robot
 ```bash
 ./setup.sh --skip-system
 ./setup.sh --gello-extra full
+./setup.sh --with-simulation-assets
 ./setup.sh --check-only
 ```
 
 - `--skip-system` 适用于系统包、pyenv 和 uv 已经安装且不希望使用 sudo 的机器；
 
-- `--gello-extra full` 额外安装相机、仿真和第三方机器人依赖；
+- `--gello-extra full` 额外安装相机、仿真和第三方机器人的 Python 依赖；
+
+- `--with-simulation-assets` 仅在确实运行 MuJoCo 仿真时下载 Menagerie 模型；
 
 - `--check-only` 不修改系统，只验证现有配置。默认 PiPER-X 跟随与记录只安装 GELLO 基础依赖。
 
@@ -133,8 +136,15 @@ cd robot
 不使用一键脚本时，先初始化 submodule：
 
 ```bash
-git submodule sync --recursive
-git submodule update --init --recursive
+git submodule sync
+git submodule update --init
+```
+
+只有仿真开发需要额外执行：
+
+```bash
+git -C gello_software submodule update \
+  --init third_party/mujoco_menagerie
 ```
 
 然后读取各子项目的 `.python-version`，由 pyenv 安装解释器并显式交给 uv。当前版本的等效命令为：
@@ -242,8 +252,8 @@ uv run --project gello_software gello read \
 
 ```bash
 git pull --ff-only
-git submodule sync --recursive
-git submodule update --init --recursive
+git submodule sync
+git submodule update --init
 ```
 
 这会把三个子项目切换到顶层仓库记录的 commit，不会自动把它们更新到远端分支最新提交。
@@ -288,8 +298,8 @@ git -C lerobot_converter status --short
 ### 1. Submodule 目录为空
 
 ```bash
-git submodule sync --recursive
-git submodule update --init --recursive
+git submodule sync
+git submodule update --init
 ```
 
 ### 2. Submodule 显示 detached HEAD

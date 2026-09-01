@@ -7,6 +7,7 @@ install_system=true
 update_submodules=true
 check_only=false
 gello_extra=""
+install_simulation_assets=false
 relogin_required=false
 
 usage() {
@@ -20,6 +21,8 @@ usage() {
   --skip-system          不使用 sudo 安装 Ubuntu 包，也不修改 dialout 用户组
   --skip-submodules      不同步或初始化 Git submodule
   --gello-extra NAME     安装 GELLO 可选依赖：camera、simulation、robots 或 full
+  --with-simulation-assets
+                         下载可选的 MuJoCo Menagerie 仿真模型
   --check-only           只检查现有配置，不执行安装或修改
   -h, --help             显示帮助
 EOF
@@ -47,6 +50,10 @@ while (( $# > 0 )); do
         --gello-extra)
             gello_extra="${2:?--gello-extra 缺少名称}"
             shift 2
+            ;;
+        --with-simulation-assets)
+            install_simulation_assets=true
+            shift
             ;;
         --check-only)
             check_only=true
@@ -136,8 +143,13 @@ if [[ "$update_submodules" == true ]]; then
             fail "submodule $submodule_path 存在未提交内容；请先提交、暂存或移走后重试"
         fi
     done < <(git config --file .gitmodules --get-regexp path | awk '{print $2}')
-    git submodule sync --recursive
-    git submodule update --init --recursive
+    git submodule sync
+    git submodule update --init
+    if [[ "$install_simulation_assets" == true ]]; then
+        git -C gello_software submodule sync
+        git -C gello_software submodule update \
+            --init third_party/mujoco_menagerie
+    fi
 else
     log "[4/7] 检查 Git submodule"
 fi
