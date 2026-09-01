@@ -4,7 +4,7 @@
 
 - `agilexrobotics/` — PiPER-X CAN 驱动、状态反馈和 ZMQ 控制服务
 - `gello_software/` — GELLO Dynamixel 读取、目标映射和实时跟随
-- `lerobot_recorder/` — 原始数据规范与 LeRobot 离线转换（待实现）
+- `lerobot_converter/` — 原始数据校验与 LeRobot 离线转换
 
 采集数据统一放在 `data/`（`raw/` 为不可变原始数据源，`lerobot/` 为转换结果），代码与数据分离。详细架构见 `README.md`。
 
