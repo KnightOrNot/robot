@@ -6,6 +6,7 @@ projects_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 agilex_dir="$projects_dir/agilexrobotics"
 gello_dir="$projects_dir/gello_software"
 gello_python="$gello_dir/.venv/bin/python"
+gello_cli=(uv run --project "$gello_dir" gello)
 gello_port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBM4Z46-if00-port0"
 can_interface="can0"
 can_bitrate="1000000"
@@ -51,7 +52,7 @@ cleanup() {
         && kill -0 "$server_pid" 2>/dev/null; then
         echo
         echo "[安全退出] 通过 GELLO JS 通道将 PiPER-X 移回零位……"
-        if "$gello_python" "$gello_dir/experiments/piper_x_movejs.py" \
+        if "${gello_cli[@]}" movejs \
             --hostname "$server_host" \
             --robot-port "$server_port"; then
             echo "[安全退出] PiPER-X 已返回零位。"
@@ -193,7 +194,7 @@ raise SystemExit(0 if valid else 1)
 fi
 
 echo "========== [3/6] 读取 GELLO 当前关节和夹爪 =========="
-gello_json="$("$gello_python" "$gello_dir/experiments/read_gello_joints.py" \
+gello_json="$("${gello_cli[@]}" read \
     --gello-port "$gello_port" --json)"
 mapfile -t gello_values < <(
     printf '%s' "$gello_json" | "$gello_python" -c '
@@ -259,12 +260,12 @@ fi
 
 cat "$server_log"
 follow_server_ready=true
-"$gello_python" "$gello_dir/experiments/piper_x_movejs.py" \
+"${gello_cli[@]}" movejs \
     --hostname "$server_host" \
     --robot-port "$server_port"
 
 echo "========== [5/6] 使用同一 JS 会话对齐 PiPER-X 六轴和夹爪…… =========="
-"$gello_python" "$gello_dir/experiments/piper_x_movejs.py" \
+"${gello_cli[@]}" movejs \
     --hostname "$server_host" \
     --robot-port "$server_port" \
     --joints "${arm_target[@]}" \
@@ -277,7 +278,7 @@ echo "GELLO 跟随已启动；按 Ctrl+C 停止客户端和服务端。"
     # --start-joints 只用于选择 GELLO Dynamixel 多圈角度的正确分支，
     # 必须传入方向映射前的 GELLO 角度。客户端会在 absolute-leader
     # 模式下再乘 joint-signs，得到与上方 arm_target 一致的目标。
-    exec "$gello_python" experiments/piper_x_follow.py \
+    exec "${gello_cli[@]}" follow \
         --gello-port "$gello_port" \
         --hostname "$server_host" \
         --robot-port "$server_port" \

@@ -17,6 +17,7 @@ robot/
 │   └── lerobot/             # 可重新生成的 LeRobot 数据集
 ├── docs/
 │   └── DEVELOPMENT.md       # 顶层联调与故障排查手册
+├── setup.sh                 # submodule、pyenv、uv 环境和系统依赖的一键配置
 ├── start_gello_follow.sh    # 跟随、校准和安全退出入口
 ├── start_data_record.sh     # 跟随、记录、安全退出和离线转换入口
 └── .gitmodules              # 三个子项目的仓库地址与挂载路径
@@ -24,11 +25,11 @@ robot/
 
 三个 submodule 的职责边界：
 
-| 子项目 | Python | 职责 |
-| --- | --- | --- |
-| `agilexrobotics` | 3.11 | 独占 PiPER-X CAN，读取反馈并提供 `ag-gello-server` |
-| `gello_software` | 3.11 | 独占 GELLO 串口，生成跟随 action 并记录 raw session |
-| `lerobot_converter` | 3.12 | 离线校验 raw session，生成 LeRobot Dataset v3 |
+| 子项目                 | Python | 职责                                       |
+| ------------------- | ------ | ---------------------------------------- |
+| `agilexrobotics`    | 3.11   | 独占 PiPER-X CAN，读取反馈并提供 `ag-gello-server` |
+| `gello_software`    | 3.11   | 独占 GELLO 串口，生成跟随 action 并记录 raw session  |
+| `lerobot_converter` | 3.12   | 离线校验 raw session，生成 LeRobot Dataset v3   |
 
 完整运行链路：
 
@@ -46,18 +47,22 @@ GELLO → gello_software → ZMQ → agilexrobotics → CAN → PiPER-X
 
 - Ubuntu 或其他支持 SocketCAN 和 USB 串口的 Linux 系统
 - Git 2.x，并支持 Git submodule
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- [pyenv](https://github.com/pyenv/pyenv)：安装和选择各子项目所需的 Python
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)：创建 `.venv`、同步锁定依赖和运行命令
 - `iproute2`：提供 CAN 配置所需的 `ip`
 - `build-essential`：安装部分 GELLO Python 依赖
 - `curl`：安装 uv
 - `ffmpeg`：为 LeRobot/TorchCodec 后续视频处理提供系统共享库
 - `lsof`：排查 GELLO 串口占用
 
-Ubuntu 安装命令：
+`setup.sh` 默认自动安装这些系统包。需要手工安装时执行：
 
 ```bash
 sudo apt update
-sudo apt install -y git curl build-essential iproute2 ffmpeg lsof
+sudo apt install -y git curl build-essential iproute2 ffmpeg lsof \
+  libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+  libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+  libffi-dev liblzma-dev
 sudo ldconfig
 ```
 
@@ -71,7 +76,7 @@ sudo ldconfig
 
 ### 3. Python 环境边界
 
-三个子项目必须保留各自的 `.venv`，不要在顶层创建一个环境混装全部依赖：
+Python 解释器由 pyenv 管理，uv 只使用 pyenv 提供的解释器创建 `.venv` 并同步依赖。三个子项目必须保留各自的 `.venv`，不要在顶层创建一个环境混装全部依赖：
 
 ```text
 agilexrobotics/.venv      Python 3.11：CAN、pyAgxArm、ZMQ
@@ -83,91 +88,70 @@ lerobot_converter/.venv   Python 3.12：LeRobot、PyTorch、Parquet、转换
 
 ## （3）快速开始
 
-### 1. 安装 uv
+### 1. Clone 顶层项目
 
-系统尚未安装 uv 时执行：
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source "$HOME/.local/bin/env"
-uv --version
-```
-
-若安装程序给出的环境加载命令不同，请以终端提示为准。
-
-### 2. Clone 顶层项目和 submodule
-
-推荐一次性递归拉取顶层仓库及三个子项目。使用 SSH：
+使用 SSH：
 
 ```bash
-git clone --recurse-submodules git@github.com:right-or-not/robot.git
+git clone git@github.com:right-or-not/robot.git
 cd robot
 ```
 
 未配置 GitHub SSH 密钥时使用 HTTPS：
 
 ```bash
-git clone --recurse-submodules https://github.com/right-or-not/robot.git
+git clone https://github.com/right-or-not/robot.git
 cd robot
 ```
 
-如果已经执行了不带 `--recurse-submodules` 的 clone，或 submodule 目录为空，在顶层执行：
+`setup.sh` 会按顶层锁定的 commit 递归初始化三个子项目以及 GELLO 的 Menagerie 资产，不要求 clone 时添加 `--recurse-submodules`。
+
+### 2. 一键配置软件环境
+
+默认配置包含 Ubuntu 系统包、submodule、pyenv、uv、三个虚拟环境、LeRobot dataset 依赖、FFmpeg/TorchCodec 验证和 `dialout` 用户组：
+
+```bash
+./setup.sh
+```
+
+脚本不会配置 CAN、访问串口或移动机械臂，可以安全重复执行。若脚本将当前用户加入了 `dialout`，完成后必须注销并重新登录。常用选项：
+
+```bash
+./setup.sh --skip-system
+./setup.sh --gello-extra full
+./setup.sh --check-only
+```
+
+- `--skip-system` 适用于系统包、pyenv 和 uv 已经安装且不希望使用 sudo 的机器；
+
+- `--gello-extra full` 额外安装相机、仿真和第三方机器人依赖；
+
+- `--check-only` 不修改系统，只验证现有配置。默认 PiPER-X 跟随与记录只安装 GELLO 基础依赖。
+
+### 3. 手工配置等效流程
+
+不使用一键脚本时，先初始化 submodule：
 
 ```bash
 git submodule sync --recursive
 git submodule update --init --recursive
 ```
 
-确认三个 submodule 均已检出到顶层仓库固定的 commit：
+然后读取各子项目的 `.python-version`，由 pyenv 安装解释器并显式交给 uv。当前版本的等效命令为：
 
 ```bash
-git submodule status
+pyenv install -s "$(pyenv latest -k 3.11)"
+pyenv install -s "$(pyenv latest -k 3.12)"
+
+python311="$(PYENV_VERSION="$(pyenv latest -k 3.11)" pyenv which python)"
+python312="$(PYENV_VERSION="$(pyenv latest -k 3.12)" pyenv which python)"
+
+UV_NO_MANAGED_PYTHON=1 uv sync --project agilexrobotics --frozen --python "$python311"
+UV_NO_MANAGED_PYTHON=1 uv sync --project gello_software --frozen --python "$python311"
+UV_NO_MANAGED_PYTHON=1 uv sync --project lerobot_converter --frozen --extra dataset --python "$python312"
 ```
 
-正常情况下应看到 `agilexrobotics`、`gello_software` 和 `lerobot_converter` 三行。行首 `-` 表示尚未初始化；行首 `+` 表示当前 checkout 与顶层记录的 commit 不一致。
-
-### 3. 初始化 AgileX 环境
-
-```bash
-cd agilexrobotics
-uv python install 3.11
-uv sync --frozen
-cd ..
-```
-
-该步骤创建 `agilexrobotics/.venv`，并安装 `ag`、`ag-gello-server`、pyAgxArm 和 SocketCAN 依赖。
-
-### 4. 初始化 GELLO 环境
-
-```bash
-cd gello_software
-uv python install 3.11
-uv venv --python 3.11
-uv pip install -r requirements.txt
-uv pip install -e .
-```
-
-GELLO 驱动还需要 ROBOTIS DynamixelSDK。当前 `gello_software/.gitmodules` 保留了上游配置，但仓库没有对应 gitlink，因此顶层的递归 submodule 命令不会自动下载它，需要显式安装：
-
-```bash
-mkdir -p third_party
-git clone https://github.com/ROBOTIS-GIT/DynamixelSDK.git third_party/DynamixelSDK
-uv pip install -e third_party/DynamixelSDK/python
-cd ..
-```
-
-如果 `third_party/DynamixelSDK` 已存在，则不要重复 clone，只需重新执行安装命令。
-
-### 5. 初始化 LeRobot Converter 环境
-
-```bash
-cd lerobot_converter
-uv python install 3.12
-uv sync --frozen --extra dataset
-cd ..
-```
-
-验证 TorchCodec 和系统 FFmpeg：
+这里的 `UV_NO_MANAGED_PYTHON=1` 防止 uv 自行下载另一套 Python。DynamixelSDK 已由 `gello_software/uv.lock` 管理，不再手工 clone。最后验证：
 
 ```bash
 ffmpeg -version
@@ -176,7 +160,7 @@ lerobot_converter/.venv/bin/python -c "from torchcodec.decoders import VideoDeco
 
 即使当前仅转换关节数据，也建议提前完成该验证，为后续视频 feature 做准备。
 
-### 6. 配置 GELLO 串口权限
+### 4. 配置 GELLO 串口权限
 
 ```bash
 sudo usermod -aG dialout "$USER"
@@ -188,13 +172,13 @@ sudo usermod -aG dialout "$USER"
 ls -l /dev/serial/by-id/
 ```
 
-默认启动脚本使用以下设备；如果你的路径不同，运行时必须通过 `--gello-port` 指定，并确保该路径已经在 `gello_software/gello/agents/gello_agent.py` 的 `PORT_CONFIG_MAP` 中正确配置：
+默认启动脚本使用以下设备；如果你的路径不同，运行时必须通过 `--gello-port` 指定，并确保该路径已经在 `gello_software/src/gello/agents/gello_agent.py` 的 `PORT_CONFIG_MAP` 中正确配置：
 
 ```text
 /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBM4Z46-if00-port0
 ```
 
-### 7. 进行只读硬件验证
+### 5. 进行只读硬件验证
 
 连接 USB-CAN 和机械臂、给 PiPER-X 上电并释放急停，然后配置 CAN：
 
@@ -215,13 +199,13 @@ cd ..
 只读检查 GELLO，将路径替换为当前设备的 `by-id` 路径：
 
 ```bash
-gello_software/.venv/bin/python gello_software/experiments/read_gello_joints.py \
+uv run --project gello_software gello read \
   --gello-port /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBM4Z46-if00-port0
 ```
 
 只有两个只读检查都能稳定通过后，才进入运动流程。
 
-### 8. 启动跟随或数据记录
+### 6. 启动跟随或数据记录
 
 先查看顶层脚本参数：
 
@@ -314,14 +298,13 @@ git submodule update --init --recursive
 
 ### 3. 找不到虚拟环境命令
 
-根据报错路径进入对应子项目重新同步环境。不要用另一个子项目的 Python 代替：
+不要用另一个子项目的 Python 代替，也不要让 uv 自行下载解释器。使用一键脚本保留 submodule 和系统配置，仅按 `.python-version` 重新检查 pyenv 并同步三个环境：
 
 ```bash
-cd agilexrobotics && uv sync --frozen && cd ..
-cd lerobot_converter && uv sync --frozen --extra dataset && cd ..
+./setup.sh --skip-system --skip-submodules
 ```
 
-GELLO 环境按照快速开始第 4 步重新初始化。
+单独修复某个环境时，按照快速开始“手工配置等效流程”显式传递 pyenv 解释器。
 
 ### 4. CAN 接口 UP 但没有反馈
 
