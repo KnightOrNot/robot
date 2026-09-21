@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 projects_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 agilex_dir="$projects_dir/agilexrobotics"
-gello_dir="$projects_dir/gello_software"
+gello_dir="$projects_dir/gello-software"
 gello_python="$gello_dir/.venv/bin/python"
 gello_cli=(uv run --project "$gello_dir" gello)
 gello_port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBM4Z46-if00-port0"
@@ -117,11 +117,11 @@ while (( $# > 0 )); do
 done
 
 if [[ ! -d "$agilex_dir" || ! -d "$gello_dir" ]]; then
-    echo "错误：agilexrobotics 或 gello_software 项目目录不存在。" >&2
+    echo "错误：agilexrobotics 或 gello-software 项目目录不存在。" >&2
     exit 1
 fi
 if [[ ! -x "$gello_python" ]]; then
-    echo "错误：找不到 $gello_python，请先安装 gello_software 环境。" >&2
+    echo "错误：找不到 $gello_python，请先安装 gello-software 环境。" >&2
     exit 1
 fi
 if ! "$gello_python" -c '

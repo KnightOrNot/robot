@@ -3,8 +3,8 @@
 本项目用于 PiPER-X 机械臂控制、GELLO 遥操作示教、原始数据采集，以及 LeRobot 标准数据集生成。三个工作域相互独立并通过明确的进程边界协作：
 
 - `agilexrobotics/` — PiPER-X CAN 驱动、状态反馈和 ZMQ 控制服务
-- `gello_software/` — GELLO Dynamixel 读取、目标映射和实时跟随
-- `lerobot_converter/` — 原始数据校验与 LeRobot 离线转换
+- `gello-software/` — GELLO Dynamixel 读取、目标映射和实时跟随
+- `lerobot-converter/` — 原始数据校验与 LeRobot 离线转换
 
 采集数据统一放在 `data/`（`raw/` 为不可变原始数据源，`lerobot/` 为转换结果），代码与数据分离。详细架构见 `README.md`。
 

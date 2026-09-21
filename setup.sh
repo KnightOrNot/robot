@@ -146,15 +146,15 @@ if [[ "$update_submodules" == true ]]; then
     git submodule sync
     git submodule update --init
     if [[ "$install_simulation_assets" == true ]]; then
-        git -C gello_software submodule sync
-        git -C gello_software submodule update \
+        git -C gello-software submodule sync
+        git -C gello-software submodule update \
             --init third_party/mujoco_menagerie
     fi
 else
     log "[4/7] 检查 Git submodule"
 fi
 
-for submodule_path in agilexrobotics gello_software lerobot_converter; do
+for submodule_path in agilexrobotics gello-software lerobot-converter; do
     [[ -f "$submodule_path/pyproject.toml" ]] \
         || fail "$submodule_path 尚未初始化；请取消 --skip-submodules"
 done
@@ -191,11 +191,11 @@ sync_project() {
 log "[5/7] 使用 pyenv Python 同步 uv 环境"
 sync_project agilexrobotics
 if [[ -n "$gello_extra" ]]; then
-    sync_project gello_software --extra "$gello_extra"
+    sync_project gello-software --extra "$gello_extra"
 else
-    sync_project gello_software
+    sync_project gello-software
 fi
-sync_project lerobot_converter --extra dataset
+sync_project lerobot-converter --extra dataset
 
 log "[6/7] 创建数据目录并验证软件入口"
 if [[ "$check_only" != true ]]; then
@@ -205,10 +205,10 @@ fi
 
 agilexrobotics/.venv/bin/ag --help >/dev/null
 agilexrobotics/.venv/bin/ag-gello-server --help >/dev/null
-gello_software/.venv/bin/gello --help >/dev/null
-lerobot_converter/.venv/bin/lerobot-converter --help >/dev/null
+gello-software/.venv/bin/gello --help >/dev/null
+lerobot-converter/.venv/bin/lerobot-converter --help >/dev/null
 ffmpeg -version >/dev/null 2>&1 || fail "FFmpeg 不可用"
-lerobot_converter/.venv/bin/python -c \
+lerobot-converter/.venv/bin/python -c \
     "from torchcodec.decoders import VideoDecoder; print('TorchCodec 加载正常')"
 
 log "[7/7] 检查 GELLO 串口用户组"
